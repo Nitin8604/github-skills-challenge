@@ -1,4 +1,4 @@
-from pathlib import Path
+import runpy
 
 from src.anomaly_detector import AnomalyDetector
 from src.aiops_pipeline import run_pipeline
@@ -42,6 +42,25 @@ def test_anomalous_record_is_detected():
     assert event["type"] == "ANOMALY"
 
 
+def test_anomalous_record_with_high_cpu_and_memory_is_detected():
+    detector = AnomalyDetector()
+
+    record = {
+        "timestamp": "2026-09-20T10:07:00",
+        "service": "auth-service",
+        "response_time_ms": 200,
+        "cpu_percent": 95,
+        "memory_percent": 85,
+        "log_level": "INFO",
+        "message": "Authentication spike"
+    }
+
+    event = detector.detect(record)
+
+    assert event is not None
+    assert event["reasons"] == ["High CPU utilization", "High memory utilization"]
+
+
 def test_producer_publishes_event():
     topic = EventTopic("anomaly-events")
     producer = EventProducer(topic)
@@ -70,3 +89,33 @@ def test_consumer_receives_event():
     messages = consumer.consume()
 
     assert len(messages) == 1
+
+
+def test_producer_rejects_empty_event():
+    topic = EventTopic("anomaly-events")
+    producer = EventProducer(topic)
+
+    assert producer.publish({}) is False
+    assert topic.get_messages() == []
+
+
+def test_topic_can_be_cleared():
+    topic = EventTopic("anomaly-events")
+    topic.publish({"type": "ANOMALY"})
+
+    topic.clear()
+
+    assert topic.get_messages() == []
+
+
+def test_run_pipeline_processes_service_data():
+    result = run_pipeline("data/service_data.json")
+
+    assert result["records_processed"] == 10
+    assert len(result["anomalies_detected"]) == 2
+    assert len(result["events_consumed"]) == 2
+    assert result["anomalies_detected"][0]["service"] == "payment-service"
+
+
+def test_pipeline_main_entrypoint_executes():
+    runpy.run_path("src/aiops_pipeline.py", run_name="__main__")
